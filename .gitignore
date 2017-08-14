@@ -27,3 +27,5 @@ ansible.log
 static-inventory
 *.retry
 roles/infra-ansible/
+.vscode
+config.yaml

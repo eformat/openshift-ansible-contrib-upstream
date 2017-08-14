@@ -159,7 +159,7 @@ fi
 subscription-manager attach --pool=$RHNPOOLID
 subscription-manager repos --disable="*"
 subscription-manager repos --enable="rhel-7-server-rpms" --enable="rhel-7-server-extras-rpms" --enable="rhel-7-fast-datapath-rpms"
-subscription-manager repos --enable="rhel-7-server-ose-3.5-rpms"
+subscription-manager repos --enable="rhel-7-server-ose-3.6-rpms"
 yum -y install atomic-openshift-utils git net-tools bind-utils iptables-services bridge-utils bash-completion httpd-tools nodejs qemu-img
 yum -y install --enablerepo="epel" jq
 touch /root/.updateok
@@ -242,7 +242,7 @@ openshift_master_api_port="{{ console_port }}"
 openshift_master_console_port="{{ console_port }}"
 openshift_override_hostname_check=true
 osm_use_cockpit=false
-openshift_release=v3.5
+openshift_release=v3.6
 openshift_cloudprovider_kind=azure
 openshift_node_local_quota_per_fsgroup=512Mi
 azure_resource_group=${RESOURCEGROUP}
@@ -393,7 +393,7 @@ cat <<EOF >> /home/${AUSERNAME}/subscribe.yml
   - name: enable fastpath repos
     shell: subscription-manager repos --enable="rhel-7-fast-datapath-rpms"
   - name: enable OCP repos
-    shell: subscription-manager repos --enable="rhel-7-server-ose-3.5-rpms"
+    shell: subscription-manager repos --enable="rhel-7-server-ose-3.6-rpms"
   - name: install the latest version of PyYAML
     yum: name=PyYAML state=latest
   - name: Install the OCP client
