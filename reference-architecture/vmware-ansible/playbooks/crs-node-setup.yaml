@@ -9,5 +9,7 @@
   - rhsm-subscription
   - gluster-rhsm-repos
   - vmware-guest-setup
+  - docker-storage-setup
+  - openshift-volume-quota
   - gluster-crs-prerequisites
   - gluster-ports

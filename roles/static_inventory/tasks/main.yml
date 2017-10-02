@@ -1,4 +1,12 @@
 ---
+- name: Remove any existing inventory
+  file:
+    path: "{{ inventory_path }}/hosts"
+    state: absent
+
+- name: Refresh the inventory
+  meta: refresh_inventory
+
 - name: Generate in-memory inventory
   include: openstack.yml
 
@@ -8,3 +16,10 @@
 - name: Generate SSH config for accessing hosts via bastion
   include: sshconfig.yml
   when: use_bastion|bool
+
+- name: Configure SSH tunneling to access UI
+  include: sshtun.yml
+  become: true
+  when:
+    - use_bastion|bool
+    - ui_ssh_tunnel|bool

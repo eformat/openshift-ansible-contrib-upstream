@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # set ts=4 sw=4 et
-import click, os, sys, fileinput, json, iptools, ldap, six
+import click, os, sys, fileinput, json, iptools, ldap, six, random
+from argparse import RawTextHelpFormatter
 from six.moves import configparser
 
 @click.command()
@@ -12,10 +13,11 @@ from six.moves import configparser
 @click.option('-v', '--verbose', count=True)
 @click.option('--create_inventory', is_flag=True, help='Helper script to create json inventory file and exit')
 @click.option('--create_ocp_vars', is_flag=True, help='Helper script to modify OpenShift ansible install variables and exit')
-@click.option('-t', '--tag', help='Ansible playbook tag for specific parts of playbook: valid targets are setup, nfs, prod, haproxy, all-vms, ocp-install, ocp-configure, ocp-demo, ocp-update or clean')
+@click.option('-t', '--tag', help='Ansible playbook tag for specific parts of playbook: valid targets are setup, nfs, prod, haproxy, ocp-install, ocp-configure, ocp-demo, ocp-update or clean')
 @click.option('--clean', is_flag=True, help='Delete all nodes and unregister from RHN')
 
 def launch_refarch_env(console_port=8443,
+                    cluster_id=None,
                     deployment_type=None,
                     openshift_vers=None,
                     vcenter_host=None,
@@ -25,6 +27,7 @@ def launch_refarch_env(console_port=8443,
                     vcenter_folder=None,
                     vcenter_cluster=None,
                     vcenter_datacenter=None,
+                    vcenter_datastore=None,
                     vcenter_resource_pool=None,
                     public_hosted_zone=None,
                     app_dns_prefix=None,
@@ -122,6 +125,7 @@ def launch_refarch_env(console_port=8443,
     if not config.has_option('vmware', k):
         config.set('vmware', k, str(v))
 
+  cluster_id = config.get('vmware', 'cluster_id')
   console_port = config.get('vmware', 'console_port')
   deployment_type = config.get('vmware','deployment_type')
   openshift_vers = config.get('vmware','openshift_vers')
@@ -132,6 +136,7 @@ def launch_refarch_env(console_port=8443,
   vcenter_folder = config.get('vmware', 'vcenter_folder')
   vcenter_cluster = config.get('vmware', 'vcenter_cluster')
   vcenter_datacenter = config.get('vmware', 'vcenter_datacenter')
+  vcenter_datastore = config.get('vmware', 'vcenter_datastore')
   vcenter_resource_pool = config.get('vmware', 'vcenter_resource_pool')
   public_hosted_zone= config.get('vmware', 'public_hosted_zone')
   app_dns_prefix = config.get('vmware', 'app_dns_prefix')
@@ -163,7 +168,7 @@ def launch_refarch_env(console_port=8443,
   ldap_fqdn = config.get('vmware', 'ldap_fqdn')
 
   err_count = 0
-  required_vars = {'public_hosted_zone':public_hosted_zone, 'vcenter_host':vcenter_host, 'vcenter_password':vcenter_password, 'vm_ipaddr_start':vm_ipaddr_start, 'ldap_fqdn':ldap_fqdn, 'ldap_user_password':ldap_user_password, 'vm_dns':vm_dns, 'vm_gw':vm_gw, 'vm_netmask':vm_netmask, 'vcenter_datacenter':vcenter_datacenter}
+  required_vars = {'public_hosted_zone':public_hosted_zone, 'vcenter_host':vcenter_host, 'vcenter_password':vcenter_password, 'vm_ipaddr_start':vm_ipaddr_start, 'ldap_fqdn':ldap_fqdn, 'ldap_user_password':ldap_user_password, 'vm_dns':vm_dns, 'vm_gw':vm_gw, 'vm_netmask':vm_netmask, 'vcenter_datacenter':vcenter_datacenter, 'vcenter_datastore':vcenter_datastore}
   for k, v in required_vars.items():
     if v == '':
         err_count += 1
@@ -249,7 +254,7 @@ def launch_refarch_env(console_port=8443,
             url_base = bindDN.replace(("CN=" + ldap_user + ","), "")
             url = "ldap://" + ldap_fqdn + ":389/" + url_base + "?sAMAccountName"
 
-        install_file = "playbooks/openshift-install.yaml"
+        install_file = "playbooks/ocp-install.yaml"
 
         for line in fileinput.input(install_file, inplace=True):
         # Parse our ldap url
@@ -291,7 +296,7 @@ def launch_refarch_env(console_port=8443,
         exit(0)
 
     if auth_type == 'none':
-        playbooks = ["playbooks/openshift-install.yaml", "playbooks/minor-update.yaml"]
+        playbooks = ["playbooks/ocp-install.yaml", "playbooks/minor-update.yaml"]
         for ocp_file in playbooks:
             for line in fileinput.input(ocp_file, inplace=True):
                 if line.startswith('#openshift_master_identity_providers:'):
@@ -322,6 +327,16 @@ def launch_refarch_env(console_port=8443,
     if not no_confirm:
          click.confirm('Continue using these values?', abort=True)
     # Create the inventory file and exit
+    if not cluster_id:
+        #create a unique cluster_id first
+        cluster_id = ''.join(random.choice('0123456789abcdefghijklmnopqrstuvwxyz') for i in range(20))
+        config.set('vmware', 'cluster_id', cluster_id)
+        for line in fileinput.input(vmware_ini_path, inplace=True):
+            if line.startswith('cluster_id'):
+                print "cluster_id=" + str(cluster_id)
+            else:
+                print line,
+
     total_nodes=int(master_nodes)+int(app_nodes)+int(infra_nodes)+int(support_nodes)
 
     if vm_ipaddr_start is None:
@@ -349,10 +364,10 @@ def launch_refarch_env(console_port=8443,
         d['host_inventory'][nfs_host] = {}
         d['host_inventory'][nfs_host]['guestname'] = nfs_host
         d['host_inventory'][nfs_host]['ip4addr'] = ip4addr[0]
-        d['host_inventory'][nfs_host]['tag'] = "infra-nfs"
+        d['host_inventory'][nfs_host]['tag'] = str(cluster_id) + "-infra-nfs"
         d['infrastructure_hosts']["nfs_server"] = {}
         d['infrastructure_hosts']["nfs_server"]['guestname'] = nfs_host
-        d['infrastructure_hosts']["nfs_server"]['tag'] = "infra-nfs"
+        d['infrastructure_hosts']["nfs_server"]['tag'] =  str(cluster_id) + "-infra-nfs"
         support_list.append(nfs_host)
         bind_entry.append(nfs_host + "\tA\t" + ip4addr[0])
         del ip4addr[0]
@@ -363,10 +378,10 @@ def launch_refarch_env(console_port=8443,
         d['host_inventory'][lb_host] = {}
         d['host_inventory'][lb_host]['guestname'] = lb_host
         d['host_inventory'][lb_host]['ip4addr'] = wild_ip
-        d['host_inventory'][lb_host]['tag'] = "loadbalancer"
+        d['host_inventory'][lb_host]['tag'] =  str(cluster_id) + "-loadbalancer"
         d['infrastructure_hosts']["haproxy"] = {}
         d['infrastructure_hosts']["haproxy"]['guestname'] = lb_host
-        d['infrastructure_hosts']["haproxy"]['tag'] = "loadbalancer"
+        d['infrastructure_hosts']["haproxy"]['tag'] = str(cluster_id) + "-loadbalancer"
         support_list.append(lb_host)
         bind_entry.append(lb_host + "\tA\t" + wild_ip)
 
@@ -380,10 +395,10 @@ def launch_refarch_env(console_port=8443,
         d['host_inventory'][master_name] = {}
         d['host_inventory'][master_name]['guestname'] = master_name
         d['host_inventory'][master_name]['ip4addr'] = ip4addr[0]
-        d['host_inventory'][master_name]['tag'] = "master"
+        d['host_inventory'][master_name]['tag'] = str(cluster_id) + "-master"
         d['production_hosts'][master_name] = {}
         d['production_hosts'][master_name]['guestname'] = master_name
-        d['production_hosts'][master_name]['tag'] = "master"
+        d['production_hosts'][master_name]['tag'] =  str(cluster_id) + "-master"
         master_list.append(master_name)
         bind_entry.append(master_name + "\tA\t" + ip4addr[0])
         del ip4addr[0]
@@ -398,10 +413,10 @@ def launch_refarch_env(console_port=8443,
         d['host_inventory'][app_name] = {}
         d['host_inventory'][app_name]['guestname'] = app_name
         d['host_inventory'][app_name]['ip4addr'] = ip4addr[0]
-        d['host_inventory'][app_name]['tag'] = "app"
+        d['host_inventory'][app_name]['tag'] =  str(cluster_id) + "-app"
         d['production_hosts'][app_name] = {}
         d['production_hosts'][app_name]['guestname'] = app_name
-        d['production_hosts'][app_name]['tag'] = "app"
+        d['production_hosts'][app_name]['tag'] = str(cluster_id) + "-app"
         app_list.append(app_name)
         bind_entry.append(app_name + "\tA\t" + ip4addr[0])
         del ip4addr[0]
@@ -414,10 +429,10 @@ def launch_refarch_env(console_port=8443,
         d['host_inventory'][infra_name] = {}
         d['host_inventory'][infra_name]['guestname'] = infra_name
         d['host_inventory'][infra_name]['ip4addr'] = ip4addr[0]
-        d['host_inventory'][infra_name]['tag'] = "infra"
+        d['host_inventory'][infra_name]['tag'] =  str(cluster_id) + "-infra"
         d['production_hosts'][infra_name] = {}
         d['production_hosts'][infra_name]['guestname'] = infra_name
-        d['production_hosts'][infra_name]['tag'] = "infra"
+        d['production_hosts'][infra_name]['tag'] = str(cluster_id) + "-infra"
         infra_list.append(infra_name)
         bind_entry.append(infra_name + "        A       " + ip4addr[0])
         del ip4addr[0]
@@ -456,111 +471,106 @@ def launch_refarch_env(console_port=8443,
     else:
                 print line,
 
-  playbooks = ['playbooks/infrastructure.yaml']
   tags.append('ocp-install')
   tags.append('ocp-configure')
 
-  for playbook in playbooks:
-    # hide cache output unless in verbose mode
-    devnull='> /dev/null'
+  # remove any cached facts to prevent stale data during a re-run
+  command='rm -rf .ansible/cached_facts'
+  os.system(command)
 
-    if verbose > 0:
-      devnull=''
+  tags = ",".join(tags)
+  if clean is True:
+      tags = 'clean'
+  if tag:
+      tags = tag
 
-    # grab the default priv key from the user"
-    command='cp -f ~/.ssh/id_rsa ssh_key/ocp3-installer'
-    os.system(command)
-    command='cp -f ~/.ssh/id_rsa ssh_key/ocp-installer'
-    os.system(command)
-    # make sure the ssh keys have the proper permissions
-    command='chmod 600 ssh_key/ocp-installer'
-    os.system(command)
+  # grab the default priv key from the user"
+  command='cp -f ~/.ssh/id_rsa ssh_key/ocp-installer'
+  os.system(command)
+  # make sure the ssh keys have the proper permissions
+  command='chmod 600 ssh_key/ocp-installer'
+  os.system(command)
 
 
+  for tag in tags.split(','):
+      playbook = "playbooks/" + tag + ".yaml"
+      tags = 'all'
 
-    # remove any cached facts to prevent stale data during a re-run
-    command='rm -rf .ansible/cached_facts'
-    os.system(command)
-    tags = ",".join(tags)
-    if clean is True:
-        # recreate inventory with added nodes to clean up
-        tags = 'clean'
-        command='./ocp-on-vmware --create_inventory --no-confirm'
-        os.system(command)
-    if tag:
-        tags = tag
+      devnull='> /dev/null'
 
-    #if local:
-    #command='ansible-playbook'
-    #else:
-    #   command='docker run -t --rm --volume `pwd`:/opt/ansible:z -v ~/.ssh:/root/.ssh:z -v /tmp:/tmp:z --net=host ansible:2.2-latest'
-    command='ansible-playbook'
-    command=command + ' --extra-vars "@./infrastructure.json" --tags %s -e \'vcenter_host=%s \
-    vcenter_username=%s \
-    vcenter_password=%s \
-    vcenter_template_name=%s \
-    vcenter_folder=%s \
-    vcenter_cluster=%s \
-    vcenter_datacenter=%s \
-    vcenter_resource_pool=%s \
-    public_hosted_zone=%s \
-    app_dns_prefix=%s \
-    vm_dns=%s \
-    vm_gw=%s \
-    vm_netmask=%s \
-    vm_network=%s \
-    wildcard_zone=%s \
-    console_port=%s \
-    deployment_type=%s \
-    openshift_vers=%s \
-    rhel_subscription_user=%s \
-    rhel_subscription_pass=%s \
-    rhel_subscription_server=%s \
-    rhel_subscription_pool="%s" \
-    openshift_sdn=%s \
-    containerized=%s \
-    container_storage=%s \
-    openshift_hosted_metrics_deploy=%s \
-    lb_host=%s \
-    nfs_host=%s \
-    nfs_registry_mountpoint=%s \' %s' % ( tags,
-                    vcenter_host,
-                    vcenter_username,
-                    vcenter_password,
-                    vcenter_template_name,
-                    vcenter_folder,
-                    vcenter_cluster,
-                    vcenter_datacenter,
-                    vcenter_resource_pool,
-                    public_hosted_zone,
-                    app_dns_prefix,
-                    vm_dns,
-                    vm_gw,
-                    vm_netmask,
-                    vm_network,
-                    wildcard_zone,
-                    console_port,
-                    deployment_type,
-                    openshift_vers,
-                    rhel_subscription_user,
-                    rhel_subscription_pass,
-                    rhel_subscription_server,
-                    rhel_subscription_pool,
-                    openshift_sdn,
-                    containerized,
-                    container_storage,
-                    openshift_hosted_metrics_deploy,
-                    lb_host,
-                    nfs_host,
-                    nfs_registry_mountpoint,
-                    playbook)
-    if verbose > 0:
-      command += " -" + "".join(['v']*verbose)
-      click.echo('We are running: %s' % command)
+      if verbose > 0:
+        devnull=''
 
-    status = os.system(command)
-    if os.WIFEXITED(status) and os.WEXITSTATUS(status) != 0:
-      return os.WEXITSTATUS(status)
+      command='ansible-playbook  --extra-vars "@./infrastructure.json" --tags %s -e \'vcenter_host=%s \
+      vcenter_username=%s \
+      vcenter_password=%s \
+      vcenter_template_name=%s \
+      vcenter_folder=%s \
+      vcenter_cluster=%s \
+      vcenter_datacenter=%s \
+      vcenter_datastore=%s \
+      vcenter_resource_pool=%s \
+      public_hosted_zone=%s \
+      app_dns_prefix=%s \
+      vm_dns=%s \
+      vm_gw=%s \
+      vm_netmask=%s \
+      vm_network=%s \
+      wildcard_zone=%s \
+      console_port=%s \
+      cluster_id=%s \
+      deployment_type=%s \
+      openshift_vers=%s \
+      rhsm_user=%s \
+      rhsm_password=%s \
+      rhel_subscription_server=%s \
+      rhsm_pool="%s" \
+      openshift_sdn=%s \
+      containerized=%s \
+      container_storage=%s \
+      openshift_hosted_metrics_deploy=%s \
+      lb_host=%s \
+      nfs_host=%s \
+      nfs_registry_mountpoint=%s \' %s' % ( tags,
+                          vcenter_host,
+                          vcenter_username,
+                          vcenter_password,
+                          vcenter_template_name,
+                          vcenter_folder,
+                          vcenter_cluster,
+                          vcenter_datacenter,
+                          vcenter_datastore,
+                          vcenter_resource_pool,
+                          public_hosted_zone,
+                          app_dns_prefix,
+                          vm_dns,
+                          vm_gw,
+                          vm_netmask,
+                          vm_network,
+                          wildcard_zone,
+                          console_port,
+                          cluster_id,
+                          deployment_type,
+                          openshift_vers,
+                          rhel_subscription_user,
+                          rhel_subscription_pass,
+                          rhel_subscription_server,
+                          rhel_subscription_pool,
+                          openshift_sdn,
+                          containerized,
+                          container_storage,
+                          openshift_hosted_metrics_deploy,
+                          lb_host,
+                          nfs_host,
+                          nfs_registry_mountpoint,
+                          playbook)
+      if verbose > 0:
+        command += " -" + "".join(['v']*verbose)
+        click.echo('We are running: %s' % command)
+
+      status = os.system(command)
+      if os.WIFEXITED(status) and os.WEXITSTATUS(status) != 0:
+        return os.WEXITSTATUS(status)
 
 if __name__ == '__main__':
 
